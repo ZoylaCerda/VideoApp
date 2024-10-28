@@ -7,12 +7,15 @@ import java.io.File
 class VideoRepository(private val context: Context) {
 
     fun getSavedVideos(): List<Uri> {
-        val videoDir = context.getExternalFilesDir(null)
+        val videoDir = context.getExternalFilesDir("videos")
         return videoDir?.listFiles()?.map { Uri.fromFile(it) } ?: emptyList()
     }
 
     fun createVideoFile(): File {
-        val videoDir = context.getExternalFilesDir(null)
-        return File(videoDir, "${System.currentTimeMillis()}.mp4")
+        val videoDir = context.getExternalFilesDir("videos")
+        if (videoDir != null && !videoDir.exists()) {
+            videoDir.mkdirs()
+        }
+        return File(videoDir, "video_${System.currentTimeMillis()}.mp4")
     }
 }

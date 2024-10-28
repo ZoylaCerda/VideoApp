@@ -1,8 +1,8 @@
-package com.example.videoapp.ui.view
-
 import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -20,7 +20,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.videoapp.ui.viewmodel.VideoViewModel
 import java.util.concurrent.Executors
@@ -31,13 +30,26 @@ fun VideoRecorderScreen(viewModel: VideoViewModel, onVideoSaved: (Uri) -> Unit) 
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
-    // Recordings state
     var recording: Recording? by remember { mutableStateOf(null) }
 
-    // Configuración del Recorder y VideoCapture
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            val allGranted = permissions.values.all { it }
+            if (!allGranted) {
+                return@rememberLauncherForActivityResult
+            }
+        }
+    )
+
+    fun checkPermissions(): Boolean {
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
+
     val videoCapture = remember {
         val recorder = Recorder.Builder()
-            .setQualitySelector(QualitySelector.from(Quality.HIGHEST)) // Selector de calidad
+            .setQualitySelector(QualitySelector.from(Quality.HIGHEST))
             .build()
         VideoCapture.withOutput(recorder)
     }
@@ -52,54 +64,59 @@ fun VideoRecorderScreen(viewModel: VideoViewModel, onVideoSaved: (Uri) -> Unit) 
                     setSurfaceProvider(previewView.surfaceProvider)
                 }
                 cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview,
-                    videoCapture
-                )
+                try {
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        videoCapture
+                    )
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
         )
 
         Button(
             onClick = {
+                if (!checkPermissions()) {
+                    launcher.launch(
+                        arrayOf(
+                            Manifest.permission.CAMERA,
+                            Manifest.permission.RECORD_AUDIO
+                        )
+                    )
+                    return@Button
+                }
+
                 if (recording == null) {
-                    // Iniciar la grabación
                     val videoFile = viewModel.createVideoFile()
                     val outputOptions = FileOutputOptions.Builder(videoFile).build()
 
-                    if (ActivityCompat.checkSelfPermission(
-                            this,
-                            Manifest.permission.RECORD_AUDIO
-                        ) != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        // TODO: Consider calling
-                        //    ActivityCompat#requestPermissions
-                        // here to request the missing permissions, and then overriding
-                        //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                        //                                          int[] grantResults)
-                        // to handle the case where the user grants the permission. See the documentation
-                        // for ActivityCompat#requestPermissions for more details.
-                        return@Button
-                    }
                     recording = videoCapture.output
                         .prepareRecording(context, outputOptions)
                         .withAudioEnabled()
                         .start(ContextCompat.getMainExecutor(context)) { event ->
                             when (event) {
                                 is VideoRecordEvent.Finalize -> {
-                                    onVideoSaved(event.outputResults.outputUri)
+                                    if (event.hasError()) {
+                                        event.cause?.printStackTrace()
+                                    } else {
+                                        val savedUri = Uri.fromFile(videoFile)
+                                        onVideoSaved(savedUri)
+                                    }
                                     recording = null
                                 }
                             }
                         }
                 } else {
-                    // Detener la grabación
                     recording?.stop()
                     recording = null
                 }
             },
-            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp)
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(16.dp)
         ) {
             Text(if (recording == null) "Grabar" else "Detener")
         }

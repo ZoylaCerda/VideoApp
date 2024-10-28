@@ -24,3 +24,4 @@ class VideoViewModel(private val repository: VideoRepository) : ViewModel() {
         return repository.createVideoFile()
     }
 }
+
